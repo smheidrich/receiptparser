@@ -20,6 +20,7 @@ class Receipt(object):
         self.date = None
         self.postal = None
         self.sum = None
+        self.items = []
         self.lines = [l.lower() for l in raw.split('\n') if l.strip()]
         self.parse()
 
@@ -29,7 +30,7 @@ class Receipt(object):
             return Receipt(config, filename, fp.read())
 
     def to_dict(self):
-        keys = "filename", "company", "date", "postal", "sum"
+        keys = "filename", "company", "date", "postal", "sum", "items"
         return dict((k, v) for (k, v) in self.__dict__.items() if k in keys)
 
     def for_format_string(self):
@@ -59,6 +60,7 @@ class Receipt(object):
         self.postal = self.parse_postal()
         self.date = self.parse_date()
         self.sum = self.parse_sum()
+        self.items = self.parse_items()
 
     def fuzzy_find(self, keyword, accuracy=0.6):
         """
@@ -78,6 +80,19 @@ class Receipt(object):
             matches = get_close_matches(keyword, words, 1, accuracy)
             if matches:
                 return line
+
+    @staticmethod
+    def fuzzy_match_line(line, keyword, accuracy=0.6):
+        """
+        like fuzzy_find above, but only returns whether a given line matches
+        """
+        words = line.split()
+        if re.search(r'\b'+keyword+r'\b', line, re.I):
+            return True
+
+        matches = get_close_matches(keyword, words, 1, accuracy)
+        if matches:
+            return True
 
     def parse_date(self):
         """
@@ -133,3 +148,23 @@ class Receipt(object):
                 sum_float = re.search(self.config.formats.sum, sum_line)
                 if sum_float:
                     return sum_float.group(0)
+
+    def parse_items(self):
+        """
+        :return: list of dicts
+        """
+        items = []
+        for line in self.lines:
+            # check whether this is the line with the sum => no more items
+            for sum_key in self.config.sum_keys:
+                if self.fuzzy_match_line(line, sum_key, 0.9):
+                    return items
+            # otherwise, assume it's an item line if it contains a price
+            # in a place other than at the very beginning
+            price_match = re.search("(?<!^)"+self.config.formats.sum, line)
+            if price_match:
+                items.append({
+                    "name": line[:price_match.start()].strip(),
+                    "price": price_match.group(0)
+                })
+        return items
